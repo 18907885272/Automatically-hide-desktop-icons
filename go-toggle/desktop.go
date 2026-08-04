@@ -35,6 +35,8 @@ type (
 const (
 	SW_HIDE = 0
 	SW_SHOW = 5
+	SW_MINIMIZE = 6
+	SW_RESTORE = 9
 
 	WM_LBUTTONUP     = 0x0202
 	WM_LBUTTONDBLCLK = 0x0203
@@ -60,8 +62,9 @@ const (
 	VK_MENU    = 0x12
 	VK_LMENU   = 0xA4
 	VK_RMENU   = 0xA5
-	VK_LWIN    = 0x5B
-	VK_RWIN    = 0x5C
+	VK_LWIN          = 0x5B
+	VK_RWIN          = 0x5C
+	KEYEVENTF_KEYUP  = 0x0002
 	VK_Q       = 0x51
 )
 
@@ -99,6 +102,7 @@ type KBDLLHOOKSTRUCT struct {
 
 var (
 	user32 = syscall.NewLazyDLL("user32.dll")
+	shell32 = syscall.NewLazyDLL("shell32.dll")
 
 	procFindWindowW              = user32.NewProc("FindWindowW")
 	procFindWindowExW            = user32.NewProc("FindWindowExW")
@@ -124,6 +128,12 @@ var (
 	procGetWindow                = user32.NewProc("GetWindow")
 	procIsChild                  = user32.NewProc("IsChild")
 	procGetParent                = user32.NewProc("GetParent")
+	procKeybdEvent               = user32.NewProc("keybd_event")
+	procEnumWindows              = user32.NewProc("EnumWindows")
+	procIsWindow                 = user32.NewProc("IsWindow")
+	procIsIconic                 = user32.NewProc("IsIconic")
+
+	procShellExecuteW            = shell32.NewProc("ShellExecuteW")
 )
 
 // ============================================================
@@ -239,6 +249,93 @@ func GetParent(hwnd HWND) HWND {
 	return HWND(ret)
 }
 
+func ShellExecuteW(hwnd HWND, operation, file, parameters, directory *uint16, nCmdShow int) {
+	procShellExecuteW.Call(
+		uintptr(hwnd),
+		uintptr(unsafe.Pointer(operation)),
+		uintptr(unsafe.Pointer(file)),
+		uintptr(unsafe.Pointer(parameters)),
+		uintptr(unsafe.Pointer(directory)),
+		uintptr(nCmdShow),
+	)
+}
+
+// 被最小化的应用窗口列表（用于恢复）
+var (
+	minimizedWindows   []HWND
+	minimizedWindowsMu sync.Mutex
+)
+
+// EnumWindows 回调（最小化所有可见顶层窗口，排除桌面和任务栏）
+var enumWindowsCB uintptr
+var enumWindowsCBOnce sync.Once
+
+func getEnumWindowsCB() uintptr {
+	enumWindowsCBOnce.Do(func() {
+		enumWindowsCB = syscall.NewCallback(minimizeEnumProc)
+	})
+	return enumWindowsCB
+}
+
+func minimizeEnumProc(hwnd HWND, lParam uintptr) uintptr {
+	// 只处理可见且未最小化的窗口
+	if !IsWindowVisible(hwnd) || IsIconic(hwnd) {
+		return 1 // 继续枚举
+	}
+
+	// 获取窗口类名
+	var buf [256]uint16
+	procGetClassNameW.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&buf[0])), 256)
+	cls := syscall.UTF16ToString(buf[:])
+
+	// 跳过桌面、任务栏、程序自带设置窗口
+	if cls == "Progman" || cls == "WorkerW" || cls == "Shell_TrayWnd" || cls == "Shell_SecondaryTrayWnd" || cls == "隐藏桌面图标设置" {
+		return 1
+	}
+
+	// 跳过无标题的窗口（通常是系统内部窗口）
+	// 检查窗口是否拥有 WS_CAPTION 样式 - 简化处理：直接保存并最小化
+	minimizedWindowsMu.Lock()
+	minimizedWindows = append(minimizedWindows, hwnd)
+	minimizedWindowsMu.Unlock()
+
+	ShowWindow(hwnd, SW_MINIMIZE)
+	return 1
+}
+
+func minimizeAllWindows() {
+	minimizedWindowsMu.Lock()
+	minimizedWindows = nil
+	minimizedWindowsMu.Unlock()
+
+	procEnumWindows.Call(getEnumWindowsCB(), 0)
+}
+
+func restoreAllWindows() {
+	minimizedWindowsMu.Lock()
+	defer minimizedWindowsMu.Unlock()
+
+	for _, hwnd := range minimizedWindows {
+		// 检查窗口是否仍有效
+		ret, _, _ := procIsWindow.Call(uintptr(hwnd))
+		if ret == 0 {
+			continue
+		}
+		ShowWindow(hwnd, SW_RESTORE)
+	}
+	minimizedWindows = nil
+}
+
+func IsWindow(hwnd HWND) bool {
+	ret, _, _ := procIsWindow.Call(uintptr(hwnd))
+	return ret != 0
+}
+
+func IsIconic(hwnd HWND) bool {
+	ret, _, _ := procIsIconic.Call(uintptr(hwnd))
+	return ret != 0
+}
+
 // ============================================================
 // 桌面图标控制
 // ============================================================
@@ -291,10 +388,14 @@ func toggleDesktopIcons() {
 	}
 
 	if desktopIconsVisible {
+		// 隐藏图标 + 恢复应用窗口
 		ShowWindow(listView, SW_HIDE)
 		desktopIconsVisible = false
 		setTrayIconHidden()
+		restoreAllWindows()
 	} else {
+		// 显示图标 + 最小化应用窗口
+		minimizeAllWindows()
 		ShowWindow(listView, SW_SHOW)
 		desktopIconsVisible = true
 		setTrayIconShown()
@@ -311,6 +412,8 @@ func showDesktopIcons() {
 		return
 	}
 	if !desktopIconsVisible {
+		// 显示桌面图标 + 最小化应用窗口
+		minimizeAllWindows()
 		ShowWindow(listView, SW_SHOW)
 		desktopIconsVisible = true
 		setTrayIconShown()
@@ -327,9 +430,11 @@ func hideDesktopIcons() {
 		return
 	}
 	if desktopIconsVisible {
+		// 隐藏图标 + 恢复应用窗口
 		ShowWindow(listView, SW_HIDE)
 		desktopIconsVisible = false
 		setTrayIconHidden()
+		restoreAllWindows()
 	}
 }
 
