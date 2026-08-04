@@ -1,0 +1,14 @@
+
+{
+    "hide_delay": 1.0,        // 隐藏延迟（单位：毫秒）
+    "toggle_hotkey": "ctrl+space", // 显示/隐藏快捷键
+    "toggle_enabled": true,     // 启用显示/隐藏快捷键
+    "exit_hotkey": "ctrl+shift+q", // 退出程序快捷键
+    "exit_enabled": true,       // 启用退出快捷键
+    "monitor_hotkey": "ctrl+win+alt", // 监视器/窗口监控快捷键
+    "monitor_enabled": true,    // 启用监控快捷键
+    "auto_hide_enabled": true,  // 开启自动隐藏
+    "dblclick_toggle_enabled": true, // 双击切换显示/隐藏（启用）
+    "dblclick_taskbar_enabled": true, // 任务栏双击触发功能（启用）
+    "idle_hide_timeout": 60.0    // 闲置自动隐藏超时（单位：秒）
+}

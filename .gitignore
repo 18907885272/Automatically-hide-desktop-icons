@@ -1,0 +1,18 @@
+﻿# 编译产物
+*.exe
+*.log
+*.syso
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 个人配置文件（示例配置已保留）
+config.json
+
+# Reasonix 运行时数据
+.reasonix/
+
+# 编辑器
+.vscode/
+.idea/

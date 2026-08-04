@@ -1,0 +1,2 @@
+[permissions]
+allow = ["Bash=python -c \"import pystray; help(pystray.Icon.__init__)\" 2>&1", "Bash=py -3 -c \"import pystray; print(pystray.__version__)\"", "Bash=py -3 -c \"import pystray; help(pystray.Icon.__init__)\" 2>&1", "Bash=py -3 -c \"import pystray; print(dir(pystray.Icon))\""]
