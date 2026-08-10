@@ -207,6 +207,6 @@ func hookThreadMain() {
 }
 
 func postQuit() {
-	showDesktopIcons()
+	showDesktopIconsOnly()
 	systrayQuit()
 }

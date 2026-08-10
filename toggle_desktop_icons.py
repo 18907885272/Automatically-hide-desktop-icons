@@ -262,9 +262,10 @@ def toggle():
         shell = Dispatch("Shell.Application")
 
         if IsWindowVisible(hwnd):
+            # 隐藏图标（不恢复应用窗口，已最小化的保持最小化）
             ShowWindow(hwnd, SW_HIDE)
-            shell.UndoMinimizeAll()
         else:
+            # 显示图标 + 最小化所有应用窗口（快速回到桌面）
             ShowWindow(hwnd, SW_SHOW)
             shell.MinimizeAll()
 

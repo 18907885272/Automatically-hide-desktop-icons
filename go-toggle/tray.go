@@ -160,7 +160,7 @@ func onTrayReady() {
 }
 
 func onTrayExit() {
-	showDesktopIcons()
+	showDesktopIconsOnly()
 }
 
 func systrayQuit() {

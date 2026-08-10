@@ -260,12 +260,6 @@ func ShellExecuteW(hwnd HWND, operation, file, parameters, directory *uint16, nC
 	)
 }
 
-// 被最小化的应用窗口列表（用于恢复）
-var (
-	minimizedWindows   []HWND
-	minimizedWindowsMu sync.Mutex
-)
-
 // EnumWindows 回调（最小化所有可见顶层窗口，排除桌面和任务栏）
 var enumWindowsCB uintptr
 var enumWindowsCBOnce sync.Once
@@ -293,37 +287,12 @@ func minimizeEnumProc(hwnd HWND, lParam uintptr) uintptr {
 		return 1
 	}
 
-	// 跳过无标题的窗口（通常是系统内部窗口）
-	// 检查窗口是否拥有 WS_CAPTION 样式 - 简化处理：直接保存并最小化
-	minimizedWindowsMu.Lock()
-	minimizedWindows = append(minimizedWindows, hwnd)
-	minimizedWindowsMu.Unlock()
-
 	ShowWindow(hwnd, SW_MINIMIZE)
 	return 1
 }
 
 func minimizeAllWindows() {
-	minimizedWindowsMu.Lock()
-	minimizedWindows = nil
-	minimizedWindowsMu.Unlock()
-
 	procEnumWindows.Call(getEnumWindowsCB(), 0)
-}
-
-func restoreAllWindows() {
-	minimizedWindowsMu.Lock()
-	defer minimizedWindowsMu.Unlock()
-
-	for _, hwnd := range minimizedWindows {
-		// 检查窗口是否仍有效
-		ret, _, _ := procIsWindow.Call(uintptr(hwnd))
-		if ret == 0 {
-			continue
-		}
-		ShowWindow(hwnd, SW_RESTORE)
-	}
-	minimizedWindows = nil
 }
 
 func IsWindow(hwnd HWND) bool {
@@ -388,11 +357,10 @@ func toggleDesktopIcons() {
 	}
 
 	if desktopIconsVisible {
-		// 隐藏图标 + 恢复应用窗口
+		// 隐藏图标（不恢复应用窗口，已最小化的保持最小化）
 		ShowWindow(listView, SW_HIDE)
 		desktopIconsVisible = false
 		setTrayIconHidden()
-		restoreAllWindows()
 	} else {
 		// 显示图标 + 最小化应用窗口
 		minimizeAllWindows()
@@ -420,6 +388,23 @@ func showDesktopIcons() {
 	}
 }
 
+// showDesktopIconsOnly 只显示桌面图标，不操作应用窗口（用于退出时）
+func showDesktopIconsOnly() {
+	log.Printf("[DEBUG] showDesktopIconsOnly 被调用")
+	desktopIconsMu.Lock()
+	defer desktopIconsMu.Unlock()
+
+	listView := findDesktopIconView()
+	if listView == 0 {
+		return
+	}
+	if !desktopIconsVisible {
+		ShowWindow(listView, SW_SHOW)
+		desktopIconsVisible = true
+		setTrayIconShown()
+	}
+}
+
 func hideDesktopIcons() {
 	log.Printf("[DEBUG] hideDesktopIcons 被调用")
 	desktopIconsMu.Lock()
@@ -430,11 +415,10 @@ func hideDesktopIcons() {
 		return
 	}
 	if desktopIconsVisible {
-		// 隐藏图标 + 恢复应用窗口
+		// 隐藏图标（不恢复应用窗口，已最小化的保持最小化）
 		ShowWindow(listView, SW_HIDE)
 		desktopIconsVisible = false
 		setTrayIconHidden()
-		restoreAllWindows()
 	}
 }
 

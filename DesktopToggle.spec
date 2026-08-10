@@ -10,13 +10,12 @@ a = Analysis(
                    'comtypes', 'comtypes.gen', 'comtypes.gen.stdole',
                    'comtypes.gen.Accessibility',
                    'comtypes.gen._00020430_0000_0000_C000_000000000046_0_2_0',
-                   'comtypes.gen._1EA4DBF0_3C3B_11CF_810C_00AA00389B71_0_1_1'],
+                   'comtypes.gen._1EA4DBF0_3C3B_11CF_810C_00AA00389B71_0_1_1',
+                   'pkg_resources'],
     hookspath=[],
-    hooksconfig={},
     runtime_hooks=[],
     excludes=[],
     noarchive=False,
-    optimize=0,
 )
 pyz = PYZ(a.pure)
 
