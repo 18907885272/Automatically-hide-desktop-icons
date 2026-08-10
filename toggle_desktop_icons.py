@@ -41,6 +41,19 @@ except ImportError:
     print("缺少 pystray / Pillow 库，请先安装：pip install pystray pillow")
     sys.exit(1)
 
+# ── 托盘图标资源 ──────────────────────────────────────────
+_tray_icon = None  # 托盘图标实例（全局引用，用于动态切换 1.png/2.png）
+
+
+def resource_path(name):
+    """获取资源文件路径（支持源码运行与 PyInstaller 打包）"""
+    if getattr(sys, 'frozen', False):
+        # PyInstaller 打包：资源位于 _MEIPASS/_internal 目录
+        base = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, name)
+
 # ── 配置加载 ──────────────────────────────────────────────
 
 
@@ -268,6 +281,7 @@ def toggle():
             # 显示图标 + 最小化所有应用窗口（快速回到桌面）
             ShowWindow(hwnd, SW_SHOW)
             shell.MinimizeAll()
+        update_tray_icon()
 
 
 def schedule_toggle(delay=0.25):
@@ -288,6 +302,7 @@ def auto_hide():
         hwnd = find_desktop_listview()
         if hwnd and IsWindowVisible(hwnd):
             ShowWindow(hwnd, SW_HIDE)
+            update_tray_icon()
 
 
 def show_desktop_icons():
@@ -299,6 +314,7 @@ def show_desktop_icons():
         hwnd = find_desktop_listview()
         if hwnd and not IsWindowVisible(hwnd):
             ShowWindow(hwnd, SW_SHOW)
+            update_tray_icon()
 
 
 def turn_off_monitor():
@@ -655,23 +671,34 @@ def stop_mouse_hook():
 # ── 系统托盘 ──────────────────────────────────────────────
 
 def create_tray_image():
-    """生成托盘图标（忍者面罩）"""
+    """加载托盘图标（桌面图标显示状态 → 1.png）"""
+    try:
+        return Image.open(resource_path("1.png")).convert("RGBA")
+    except Exception:
+        pass
+    # 回退：绘制一个简单图标（找不到图片文件时）
     img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-
-    # 头部（深灰色圆）
     draw.ellipse([4, 4, 60, 60], fill=(35, 35, 35), outline=(80, 80, 80), width=2)
-
-    # 双眼（白色横条）
     draw.rectangle([14, 25, 25, 29], fill=(220, 220, 220))
     draw.rectangle([39, 25, 50, 29], fill=(220, 220, 220))
-
-    # 头巾（红色横带）
     draw.rectangle([4, 14, 60, 21], fill=(180, 30, 30), outline=(120, 20, 20), width=1)
-
-    # 头巾飘带
     draw.polygon([(60, 14), (64, 10), (64, 17), (60, 21)], fill=(180, 30, 30))
     return img
+
+
+def update_tray_icon():
+    """根据桌面图标可见状态切换托盘图标：显示→1.png，隐藏→2.png"""
+    global _tray_icon
+    if _tray_icon is None:
+        return
+    try:
+        hwnd = find_desktop_listview()
+        visible = bool(hwnd) and bool(IsWindowVisible(hwnd))
+        name = "1.png" if visible else "2.png"
+        _tray_icon.icon = Image.open(resource_path(name)).convert("RGBA")
+    except Exception:
+        pass
 
 
 def on_exit(icon, _item):
@@ -739,6 +766,8 @@ def create_tray_icon():
         )
     )
     _patch_tray_click_handlers(icon)
+    global _tray_icon
+    _tray_icon = icon
     return icon
 
 

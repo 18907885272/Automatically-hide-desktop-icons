@@ -5,7 +5,7 @@ a = Analysis(
     ['toggle_desktop_icons.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('1.png', '.'), ('2.png', '.')],
     hiddenimports=['pystray._win32', 'win32com', 'pythoncom', 'win32api', 'win32gui', 'win32con',
                    'comtypes', 'comtypes.gen', 'comtypes.gen.stdole',
                    'comtypes.gen.Accessibility',
