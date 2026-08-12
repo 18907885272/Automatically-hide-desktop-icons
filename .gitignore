@@ -1,5 +1,4 @@
-﻿# 编译产物
-*.exe
+﻿# 编译产物（日志、Go 资源文件忽略，exe 保留提交）
 *.log
 *.syso
 
@@ -7,8 +6,8 @@
 __pycache__/
 *.pyc
 
-# 个人配置文件（示例配置已保留）
-config.json
+# 个人配置文件（示例配置已保留，提交实际 config.json 以提供默认配置）
+#config.json
 
 # Reasonix 运行时数据
 .reasonix/
@@ -18,4 +17,6 @@ config.json
 .idea/
 
 go-toggle/.gopath/
+go-toggle/自动隐藏桌面图标.exe
+go-toggle/config.json
 

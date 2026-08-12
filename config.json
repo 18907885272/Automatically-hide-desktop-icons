@@ -1,0 +1,12 @@
+{
+    "toggle_hotkey": "ctrl+space",
+    "toggle_enabled": true,
+    "exit_hotkey": "ctrl+shift+q",
+    "exit_enabled": true,
+    "monitor_hotkey": "ctrl+win+alt",
+    "monitor_enabled": true,
+    "dblclick_toggle_enabled": true,
+    "dblclick_desktop_enabled": true,
+    "dblclick_taskbar_enabled": true,
+    "idle_hide_timeout": 60
+}
