@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"sync"
 	"syscall"
 	"time"
@@ -119,6 +118,8 @@ var (
 	procSendMessageW             = user32.NewProc("SendMessageW")
 	procSetForegroundWindow      = user32.NewProc("SetForegroundWindow")
 	procGetWindowRect            = user32.NewProc("GetWindowRect")
+	procScreenToClient           = user32.NewProc("ScreenToClient")
+	procClientToScreen           = user32.NewProc("ClientToScreen")
 	procPostMessageW             = user32.NewProc("PostMessageW")
 	procPostThreadMessageW       = user32.NewProc("PostThreadMessageW")
 	procGetMessageW              = user32.NewProc("GetMessageW")
@@ -225,6 +226,102 @@ func PostThreadMessageW(threadID uint32, msg uint32, wParam, lParam uintptr) boo
 	return ret != 0
 }
 
+func ScreenToClient(hwnd HWND, pt *POINT) bool {
+	ret, _, _ := procScreenToClient.Call(uintptr(hwnd), uintptr(unsafe.Pointer(pt)))
+	return ret != 0
+}
+
+func ClientToScreen(hwnd HWND, pt *POINT) bool {
+	ret, _, _ := procClientToScreen.Call(uintptr(hwnd), uintptr(unsafe.Pointer(pt)))
+	return ret != 0
+}
+
+// ============================================================
+// ============================================================
+// 桌面图标命中检测（图标网格推断方案）
+// ============================================================
+
+// 桌面 ListView 不支持 LVM_HITTEST / LVM_GETITEMPOSITION（Windows 特殊控件），
+// 但支持 LVM_GETITEMCOUNT（图标数量）和 LVM_GETITEMSPACING（网格间距）。
+// 方案：用图标数量 + 网格间距推断每个图标的位置，双击时纯内存判断。
+
+var (
+	iconRects     []RECT
+	iconRectsTime time.Time
+	iconRectsMu   sync.Mutex
+)
+
+// getIconRects 推断桌面所有图标的屏幕坐标矩形，带 10 秒缓存
+// 基于 LVM_GETITEMSPACING 返回的网格间距（如 76x98）计算
+func getIconRects() []RECT {
+	iconRectsMu.Lock()
+	defer iconRectsMu.Unlock()
+
+	if len(iconRects) > 0 && time.Since(iconRectsTime) < 10*time.Second {
+		return iconRects
+	}
+
+	listView := findDesktopIconView()
+	if listView == 0 {
+		return nil
+	}
+
+	// 获取图标数量（该消息可靠且快速）
+	count, _, _ := procSendMessageW.Call(uintptr(listView), LVM_GETITEMCOUNT, 0, 0)
+	n := int(count)
+	if n <= 0 || n > 2000 {
+		iconRects = nil
+		iconRectsTime = time.Now()
+		return nil
+	}
+
+	// 获取网格间距：LOWORD = 水平间距，HIWORD = 垂直间距
+	spacing, _, _ := procSendMessageW.Call(uintptr(listView), LVM_GETITEMSPACING, 0, 0)
+	spX := int(spacing & 0xFFFF)
+	spY := int(spacing >> 16)
+	if spX < 40 || spY < 40 {
+		spX, spY = 76, 98 // 默认值
+	}
+
+	// 获取 ListView 客户区宽度 → 计算每行图标数
+	var winRect RECT
+	procGetWindowRect.Call(uintptr(listView), uintptr(unsafe.Pointer(&winRect)))
+	clientW := int(winRect.Right - winRect.Left)
+	cols := clientW / spX
+	if cols < 1 {
+		cols = 1
+	}
+
+	// 生成图标矩形（网格中心 ± 20px 命中区域）
+	rects := make([]RECT, 0, n)
+	for i := 0; i < n; i++ {
+		cx := (i%cols)*spX + spX/2
+		cy := (i/cols)*spY + spY/2
+		rects = append(rects, RECT{
+			Left:   LONG(cx - 22),
+			Top:    LONG(cy - 22),
+			Right:  LONG(cx + 22),
+			Bottom: LONG(cy + 22),
+		})
+	}
+
+	iconRects = rects
+	iconRectsTime = time.Now()
+	return rects
+}
+
+// isClickOnDesktopIcon 判断屏幕坐标 pt 是否命中桌面图标
+// 基于推断的图标网格做纯内存判断，速度快且不依赖 Explorer 响应
+func isClickOnDesktopIcon(pt POINT) bool {
+	rects := getIconRects()
+	for _, r := range rects {
+		if pt.X >= r.Left && pt.X <= r.Right && pt.Y >= r.Top && pt.Y <= r.Bottom {
+			return true
+		}
+	}
+	return false
+}
+
 func GetMessageW(msg *MSG, hwnd HWND, msgFilterMin, msgFilterMax uint32) bool {
 	ret, _, _ := procGetMessageW.Call(uintptr(unsafe.Pointer(msg)), uintptr(hwnd), uintptr(msgFilterMin), uintptr(msgFilterMax))
 	return ret != 0
@@ -313,9 +410,24 @@ var (
 	desktopIconsVisible = true
 	desktopIconsMu      sync.Mutex
 	lastToggleTime      time.Time
+
+	// 缓存桌面图标 ListView 句柄，避免每次调用重复遍历窗口树
+	cachedListView   HWND
+	cacheValidTime   time.Time
+	listViewMu       sync.Mutex
 )
 
+// findDesktopIconView 查找桌面图标 ListView 窗口句柄
+// 结果会被缓存（缓存 10 秒），避免每次调用都遍历窗口树
 func findDesktopIconView() HWND {
+	listViewMu.Lock()
+	defer listViewMu.Unlock()
+
+	// 缓存有效期内直接返回缓存值
+	if cachedListView != 0 && time.Since(cacheValidTime) < 10*time.Second {
+		return cachedListView
+	}
+
 	progman := FindWindowW(syscall.StringToUTF16Ptr("Progman"), nil)
 	if progman == 0 {
 		return 0
@@ -336,6 +448,8 @@ func findDesktopIconView() HWND {
 		return 0
 	}
 	listView := FindWindowExW(defView, 0, syscall.StringToUTF16Ptr("SysListView32"), nil)
+	cachedListView = listView
+	cacheValidTime = time.Now()
 	return listView
 }
 
@@ -345,8 +459,6 @@ func toggleDesktopIcons() {
 		return
 	}
 	lastToggleTime = time.Now()
-
-	log.Printf("[DEBUG] toggleDesktopIcons 被调用")
 
 	desktopIconsMu.Lock()
 	defer desktopIconsMu.Unlock()
@@ -371,7 +483,6 @@ func toggleDesktopIcons() {
 }
 
 func showDesktopIcons() {
-	log.Printf("[DEBUG] showDesktopIcons 被调用")
 	desktopIconsMu.Lock()
 	defer desktopIconsMu.Unlock()
 
@@ -390,7 +501,6 @@ func showDesktopIcons() {
 
 // showDesktopIconsOnly 只显示桌面图标，不操作应用窗口（用于退出时）
 func showDesktopIconsOnly() {
-	log.Printf("[DEBUG] showDesktopIconsOnly 被调用")
 	desktopIconsMu.Lock()
 	defer desktopIconsMu.Unlock()
 
@@ -406,7 +516,6 @@ func showDesktopIconsOnly() {
 }
 
 func hideDesktopIcons() {
-	log.Printf("[DEBUG] hideDesktopIcons 被调用")
 	desktopIconsMu.Lock()
 	defer desktopIconsMu.Unlock()
 
@@ -433,7 +542,6 @@ func isDesktopIconsVisible() bool {
 // ============================================================
 
 func turnOffMonitor() {
-	log.Printf("[DEBUG] turnOffMonitor 被调用")
 	hwnd := FindWindowW(syscall.StringToUTF16Ptr("Progman"), nil)
 	if hwnd != 0 {
 		// 先尝试发送到 Progman 窗口
@@ -471,10 +579,13 @@ const WM_QUIT = 0x0012
 // ============================================================
 
 const (
-	LVM_FIRST     = 0x1000
-	LVM_HITTEST   = LVM_FIRST + 18
-	LVHT_NOWHERE  = 0x0001
-	LVHT_ONITEM   = 0x0002 | 0x0004 | 0x0008 // icon | label | state icon
+	LVM_FIRST        = 0x1000
+	LVM_GETITEMCOUNT = LVM_FIRST + 4
+	LVM_GETITEMSPACING = LVM_FIRST + 51
+	LVM_GETITEMPOSITION = LVM_FIRST + 16
+	LVM_HITTEST      = LVM_FIRST + 18
+	LVHT_NOWHERE     = 0x0001
+	LVHT_ONITEM      = 0x0002 | 0x0004 | 0x0008 // icon | label | state icon
 )
 
 // LVHITTESTINFO 是 ListView 命中测试结构

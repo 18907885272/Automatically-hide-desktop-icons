@@ -712,28 +712,194 @@ def on_exit(icon, _item):
 
 def _patch_tray_click_handlers(icon):
     """Monkey-patch 托盘图标的 _on_notify 以自定义点击行为：
-    - 左键单击：切换隐藏/显示桌面图标
-    - 右键单击：弹出退出菜单（默认行为不变）
+    - 左键双击：切换隐藏/显示桌面图标（单击不切换）
+    - 右键单击：弹出菜单（默认行为不变）
+
+    采用类级别 patch（同时更新实例）：即使 _message_handlers 被重置，
+    单击也永远不会触发 pystray 默认行为（激活第一个菜单项"切换桌面图标"）。
     """
     import pystray._win32 as _pw
     win32 = _pw.win32
 
-    original_on_notify = icon._on_notify
+    if getattr(_pw.Icon, '_desktop_toggle_patched', False):
+        # 已 patch 过：仅确保当前实例仍指向 patch 版本
+        icon._on_notify = icon._message_handlers[win32.WM_NOTIFY] = _pw.Icon._on_notify.__get__(icon, _pw.Icon)
+        return
+
+    original_on_notify = _pw.Icon._on_notify
     click_timer = [None]
 
-    def patched_on_notify(wparam, lparam):
-        if lparam == win32.WM_LBUTTONUP:
-            # 左键单击：100ms 后切换
-            if click_timer[0] is not None:
-                click_timer[0].cancel()
-            click_timer[0] = threading.Timer(0.1, toggle)
-            click_timer[0].start()
-        else:
-            original_on_notify(wparam, lparam)
+    def _clear_click_timer():
+        click_timer[0] = None
 
-    # 必须同时更新 _message_handlers，因为它在 __init__ 时已缓存了旧方法引用
-    icon._on_notify = patched_on_notify
-    icon._message_handlers[win32.WM_NOTIFY] = patched_on_notify
+    def patched_on_notify(self, wparam, lparam):
+        if lparam == win32.WM_LBUTTONUP:
+            if click_timer[0] is not None:
+                # 双击窗口内第二次点击：触发切换
+                click_timer[0].cancel()
+                click_timer[0] = None
+                toggle()
+            else:
+                # 第一次点击：启动计时器等待判断是否双击（单击不切换）
+                click_timer[0] = threading.Timer(_DOUBLECLICK_TIME, _clear_click_timer)
+                click_timer[0].start()
+        else:
+            return original_on_notify(self, wparam, lparam)
+
+    # 类级别 patch：任何实例、任何时刻的 WM_LBUTTONUP 都走双击逻辑
+    _pw.Icon._on_notify = patched_on_notify
+    _pw.Icon._desktop_toggle_patched = True
+    # 同时更新当前实例（含 __init__ 时缓存的 _message_handlers 引用）
+    icon._on_notify = icon._message_handlers[win32.WM_NOTIFY] = patched_on_notify.__get__(icon, _pw.Icon)
+
+
+# ── 热键注册（保存设置后重新注册） ──────────────────────
+_hotkey_handles = []
+
+
+def register_hotkeys():
+    """按配置注册全局热键（先注销旧热键）"""
+    global _hotkey_handles
+    for h in _hotkey_handles:
+        try:
+            keyboard.remove_hotkey(h)
+        except Exception:
+            pass
+    _hotkey_handles = []
+    cfg = _config
+    if cfg.get("toggle_enabled", True):
+        _hotkey_handles.append(keyboard.add_hotkey(cfg["toggle_hotkey"], toggle))
+    if cfg.get("monitor_enabled", True):
+        _hotkey_handles.append(keyboard.add_hotkey(cfg["monitor_hotkey"], turn_off_monitor))
+    if cfg.get("exit_enabled", True):
+        _hotkey_handles.append(keyboard.add_hotkey(cfg["exit_hotkey"], lambda: on_exit(_tray_icon, None)))
+
+
+def apply_hook_changes():
+    """按配置启动/停止钩子（保存设置后调用，使开关即时生效）"""
+    cfg = _config
+    # 前景窗口钩子（点击窗口自动隐藏）
+    stop_foreground_hook()
+    if cfg.get("auto_hide_enabled", True):
+        start_foreground_hook()
+    # 鼠标钩子（双击 / 空闲超时）
+    stop_mouse_hook()
+    need_poll = cfg.get("dblclick_toggle_enabled", True) or \
+                cfg.get("dblclick_taskbar_enabled", True) or \
+                cfg.get("idle_hide_timeout", 0.0) > 0
+    if need_poll:
+        start_mouse_hook()
+
+
+# ── 设置窗口（tkinter） ──────────────────────────────────
+
+def open_settings(icon=None, item=None):
+    """打开设置窗口（独立线程运行，避免阻塞托盘/热键线程）"""
+    threading.Thread(target=_settings_dialog, daemon=True).start()
+
+
+def _settings_dialog():
+    """tkinter 设置对话框：修改配置并保存"""
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+    except ImportError:
+        return
+
+    cfg = dict(_config)
+    root = tk.Tk()
+    root.title("自动隐藏桌面图标 - 设置")
+    root.resizable(False, False)
+    vars_ = {}
+
+    def _add_bool(key, label):
+        v = tk.BooleanVar(value=bool(cfg.get(key, False)))
+        tk.Checkbutton(root, text=label, variable=v).grid(sticky="w", padx=14, pady=2)
+        vars_[key] = v
+
+    def _add_str(key, label):
+        v = tk.StringVar(value=str(cfg.get(key, "")))
+        f = tk.Frame(root)
+        f.grid(sticky="ew", padx=14, pady=2)
+        tk.Label(f, text=label, width=20, anchor="w").pack(side="left")
+        tk.Entry(f, textvariable=v, width=18).pack(side="left")
+        vars_[key] = v
+
+    def _add_num(key, label):
+        v = tk.StringVar(value=str(cfg.get(key, 0.0)))
+        f = tk.Frame(root)
+        f.grid(sticky="ew", padx=14, pady=2)
+        tk.Label(f, text=label, width=20, anchor="w").pack(side="left")
+        tk.Entry(f, textvariable=v, width=18).pack(side="left")
+        vars_[key] = v
+
+    tk.Label(root, text="快捷键", font=("Microsoft YaHei", 9, "bold")).grid(sticky="w", padx=10, pady=(10, 2))
+    _add_str("toggle_hotkey", "切换快捷键")
+    _add_bool("toggle_enabled", "启用切换快捷键")
+    _add_str("exit_hotkey", "退出快捷键")
+    _add_bool("exit_enabled", "启用退出快捷键")
+    _add_str("monitor_hotkey", "关屏快捷键")
+    _add_bool("monitor_enabled", "启用关屏快捷键")
+
+    tk.Label(root, text="功能开关", font=("Microsoft YaHei", 9, "bold")).grid(sticky="w", padx=10, pady=(10, 2))
+    _add_bool("auto_hide_enabled", "点击窗口自动隐藏")
+    _add_bool("dblclick_toggle_enabled", "桌面双击切换")
+    _add_bool("dblclick_taskbar_enabled", "任务栏双击切换")
+
+    tk.Label(root, text="其他", font=("Microsoft YaHei", 9, "bold")).grid(sticky="w", padx=10, pady=(10, 2))
+    _add_num("idle_hide_timeout", "空闲超时（秒，0=禁用）")
+    _add_num("hide_delay", "点击窗口后隐藏延迟（秒）")
+
+    def save():
+        new_cfg = {}
+        for k, v in vars_.items():
+            if isinstance(v, tk.BooleanVar):
+                new_cfg[k] = v.get()
+            elif k in ("idle_hide_timeout", "hide_delay"):
+                try:
+                    new_cfg[k] = float(v.get())
+                except ValueError:
+                    messagebox.showerror("错误", f"{k} 必须是数字", parent=root)
+                    return
+            else:
+                new_cfg[k] = v.get().strip()
+        for k in ("toggle_hotkey", "exit_hotkey", "monitor_hotkey"):
+            if not new_cfg.get(k):
+                messagebox.showerror("错误", "快捷键不能为空", parent=root)
+                return
+        try:
+            with open(get_config_path(), 'w', encoding='utf-8') as f:
+                json.dump(new_cfg, f, indent=4, ensure_ascii=False)
+        except OSError as e:
+            messagebox.showerror("错误", f"保存配置失败: {e}", parent=root)
+            return
+        # 更新内存配置，并让新配置即时生效
+        _config.clear()
+        _config.update(new_cfg)
+        # 防御：确保托盘双击 patch 始终生效（防止实例 handler 被重置导致单击切换）
+        try:
+            if _tray_icon is not None:
+                _patch_tray_click_handlers(_tray_icon)
+        except Exception:
+            pass
+        register_hotkeys()
+        apply_hook_changes()
+        try:
+            update_tray_icon()
+        except Exception:
+            pass
+        messagebox.showinfo("提示", "设置已保存并生效", parent=root)
+        root.destroy()
+
+    def cancel():
+        root.destroy()
+
+    btns = tk.Frame(root)
+    btns.grid(pady=12)
+    tk.Button(btns, text="保存", width=10, command=save).pack(side="left", padx=6)
+    tk.Button(btns, text="取消", width=10, command=cancel).pack(side="left", padx=6)
+
+    root.mainloop()
 
 
 def create_tray_icon():
@@ -762,6 +928,9 @@ def create_tray_icon():
         create_tray_image(),
         tooltip,
         menu=pystray.Menu(
+            pystray.MenuItem("切换桌面图标", lambda icon, item: toggle()),
+            pystray.MenuItem("设置", open_settings),
+            pystray.Menu.SEPARATOR,
             pystray.MenuItem("退出", on_exit)
         )
     )
@@ -792,12 +961,7 @@ def main():
     tray_icon.run_detached()
 
     # 3. 注册全局热键（按配置启用）
-    if cfg.get("toggle_enabled", True):
-        keyboard.add_hotkey(cfg["toggle_hotkey"], toggle)
-    if cfg.get("monitor_enabled", True):
-        keyboard.add_hotkey(cfg["monitor_hotkey"], turn_off_monitor)
-    if cfg.get("exit_enabled", True):
-        keyboard.add_hotkey(cfg["exit_hotkey"], lambda: on_exit(tray_icon, None))
+    register_hotkeys()
 
     # 4. 常驻后台
     keyboard.wait()

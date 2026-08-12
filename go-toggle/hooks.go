@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"runtime"
 	"time"
 	"unsafe"
@@ -46,7 +45,7 @@ func handleMouseEvent(nCode int, wParam, lParam uintptr) {
 	pt := msll.Pt
 	now := uint32(msll.Time)
 
-	// 双击检测
+	// 双击检测（纯内存比较，不调用 Win32 API）
 	dt := GetDoubleClickTime()
 	isDoubleClick := (now-lastClickTime < dt &&
 		abs(int(pt.X-lastClickPt.X)) < 4 &&
@@ -55,30 +54,35 @@ func handleMouseEvent(nCode int, wParam, lParam uintptr) {
 	lastClickTime = now
 	lastClickPt = pt
 
+	// 非双击：直接返回，避免每次点击都调用 Win32 API 和写日志
+	// 这是低层全局钩子，会收到全系统所有鼠标点击，必须保持轻量
+	if !isDoubleClick {
+		resetIdleTimer()
+		return
+	}
+
+	// 以下只在双击时执行
 	// 获取点击位置下的窗口
 	hwnd := WindowFromPoint(pt)
+	className := GetClassNameW(hwnd)
 
-	// 方案：使用 GetAncestor(GA_ROOT) 获取顶层父窗口
-	// 对于顶层窗口（应用窗口、桌面、任务栏）→ 返回窗口自身
-	// 对于子窗口（桌面图标列表、任务栏子控件）→ 返回顶层父窗口
-	root := GetAncestor(hwnd, GA_ROOT)
-	className := GetClassNameW(root)
+	// 判断是否在任务栏上
+	isTaskbar := (className == "MSTaskListWClass" || className == "Shell_TrayWnd" || className == "Shell_SecondaryTrayWnd")
 
-	isDesktop := (className == "Progman" || className == "WorkerW")
-	isTaskbar := (className == "Shell_TrayWnd" || className == "Shell_SecondaryTrayWnd")
+	// 判断是否在桌面上（Progman/WorkerW/SysListView32/SHELLDLL_DefView 都属于桌面区域，
+	// SysListView32 覆盖整个桌面包括图标和空白处；
+	// 图标隐藏后 WindowFromPoint 会返回其父窗口 SHELLDLL_DefView）
+	isDesktop := (className == "Progman" || className == "WorkerW" || className == "SysListView32" || className == "SHELLDLL_DefView")
 
-	// 调试日志
-	log.Printf("[DEBUG] 双击检测: hwnd=0x%X, root=0x%X, className=%s, isDesktop=%v, isTaskbar=%v, isDoubleClick=%v",
-		hwnd, root, className, isDesktop, isTaskbar, isDoubleClick)
-
-	// 只有双击桌面空白区域或任务栏空白区域才触发切换
-	// 其他任何区域（图标、应用窗口等）都不触发
-	if isDesktop && cfg.DblclickToggleEnabled && cfg.DblclickDesktopEnabled && isDoubleClick {
-		log.Printf("[DEBUG] 双击桌面空白处，触发切换")
+	// 只有双击任务栏空白区域才触发切换
+	if isTaskbar && cfg.DblclickToggleEnabled && cfg.DblclickTaskbarEnabled {
 		toggleDesktopIcons()
-	} else if isTaskbar && cfg.DblclickToggleEnabled && cfg.DblclickTaskbarEnabled && isDoubleClick {
-		log.Printf("[DEBUG] 双击任务栏空白处，触发切换")
-		toggleDesktopIcons()
+	} else if isDesktop && cfg.DblclickToggleEnabled && cfg.DblclickDesktopEnabled {
+		// 双击桌面：判断是否点在图标上（用第一次点击的位置判断）
+		iconHit := isClickOnDesktopIcon(lastClickPt)
+		if !iconHit {
+			toggleDesktopIcons()
+		}
 	}
 
 	// 重置空闲定时器
@@ -118,20 +122,15 @@ func handleHotkey(vkCode uint32) {
 	alt := currentIsAlt || (GetAsyncKeyState(VK_MENU)&0x8000 != 0)
 	win := currentIsWin || (GetAsyncKeyState(VK_LWIN)&0x8000 != 0 || GetAsyncKeyState(VK_RWIN)&0x8000 != 0)
 
-	log.Printf("[DEBUG] 热键检测: vkCode=0x%X, ctrl=%v, shift=%v, alt=%v, win=%v",
-		vkCode, ctrl, shift, alt, win)
-
+	// 命中热键时执行
 	if cfg.ToggleEnabled && ctrl && !shift && !alt && !win && (vkCode == VK_SPACE) {
-		log.Printf("[DEBUG] 触发切换热键")
 		toggleDesktopIcons()
 		resetIdleTimer()
 	}
 	if cfg.ExitEnabled && ctrl && shift && !alt && !win && (vkCode == VK_Q) {
-		log.Printf("[DEBUG] 触发退出热键")
 		postQuit()
 	}
 	if cfg.MonitorEnabled && ctrl && !shift && alt && win && currentIsAlt {
-		log.Printf("[DEBUG] 触发关屏热键")
 		turnOffMonitor()
 	}
 }
@@ -171,15 +170,9 @@ func hookThreadMain() {
 
 	// 鼠标钩子
 	mouseHook = SetWindowsHookExW(WH_MOUSE_LL, windows.NewCallback(mouseHookProc), hModHandle, 0)
-	if mouseHook == 0 {
-		log.Printf("SetWindowsHookEx(WH_MOUSE_LL) failed")
-	}
 
 	// 键盘钩子
 	keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, windows.NewCallback(keyboardHookProc), hModHandle, 0)
-	if keyboardHook == 0 {
-		log.Printf("SetWindowsHookEx(WH_KEYBOARD_LL) failed")
-	}
 
 	hookThreadID = windows.GetCurrentThreadId()
 

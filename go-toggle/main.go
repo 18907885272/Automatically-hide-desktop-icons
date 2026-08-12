@@ -1,6 +1,8 @@
 package main
 
 import (
+	"io"
+	"log"
 	"os"
 	"os/signal"
 
@@ -9,11 +11,14 @@ import (
 
 var (
 	cfg *Config
-	version = "v2026.08.10"
+	version = "v2"
 	productName = "自动隐藏桌面图标"
 )
 
 func main() {
+	// 关闭日志输出（不写日志文件，不打印到控制台）
+	log.SetOutput(io.Discard)
+
 	// 加载配置
 	cfg = loadConfig()
 

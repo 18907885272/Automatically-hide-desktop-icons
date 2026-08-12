@@ -16,3 +16,6 @@ config.json
 # 编辑器
 .vscode/
 .idea/
+
+go-toggle/.gopath/
+
