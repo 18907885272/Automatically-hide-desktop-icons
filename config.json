@@ -3,7 +3,7 @@
     "toggle_enabled": true,
     "exit_hotkey": "ctrl+shift+q",
     "exit_enabled": true,
-    "monitor_hotkey": "ctrl+win+alt",
+    "monitor_hotkey": "ctrl+alt+down",
     "monitor_enabled": true,
     "dblclick_toggle_enabled": true,
     "dblclick_desktop_enabled": true,

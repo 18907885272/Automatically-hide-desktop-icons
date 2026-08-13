@@ -42,6 +42,11 @@ const (
 	WM_RBUTTONUP     = 0x0205
 	WM_KEYDOWN       = 0x0100
 	WM_SYSKEYDOWN    = 0x0104
+	WM_SYSCOMMAND    = 0x0112
+
+	HWND_BROADCAST = 0xFFFF
+
+	SC_MONITORPOWER = 0xF170
 
 	GA_ROOT = 2
 
@@ -64,7 +69,15 @@ const (
 	VK_LWIN          = 0x5B
 	VK_RWIN          = 0x5C
 	KEYEVENTF_KEYUP  = 0x0002
+	LLKHF_INJECTED   = 0x0010
 	VK_Q       = 0x51
+	VK_DOWN    = 0x28
+	VK_UP      = 0x26
+	VK_LEFT    = 0x25
+	VK_RIGHT   = 0x27
+	VK_ESCAPE  = 0x1B
+	VK_RETURN  = 0x0D
+	VK_TAB     = 0x09
 )
 
 // RECT 结构
@@ -541,15 +554,57 @@ func isDesktopIconsVisible() bool {
 // 关闭显示器
 // ============================================================
 
+const (
+	// monitorOffProtectDuration 关屏后防误唤醒保护窗口时长：
+	// Windows 下松开热键、鼠标动作都会立即点亮已关闭的显示器，
+	// 在保护窗口内吞掉所有输入并周期重发关屏命令，覆盖这些"立即唤醒"。
+	monitorOffProtectDuration = 3 * time.Second
+	// monitorOffProtectInterval 保护窗口内重发关屏命令的间隔
+	monitorOffProtectInterval = 250 * time.Millisecond
+)
+
+// keybdEvent 调用 Win32 keybd_event 模拟键盘事件
+func keybdEvent(vk, scan, flags, extra uint32) {
+	procKeybdEvent.Call(uintptr(vk), uintptr(scan), uintptr(flags), uintptr(extra))
+}
+
+// releaseModifiers 补发修饰键 keyup，修复系统键状态。
+// 关屏热键（如 Ctrl+Alt+Down）的修饰键 keydown 已透传给系统，
+// 但松开时的 keyup 会被关屏保护窗口吞掉，导致系统认为 Ctrl/Alt 一直按住、
+// 后续所有快捷键错乱。补发的 keyup 带 LLKHF_INJECTED 标志，会被钩子放行透传。
+func releaseModifiers() {
+	keybdEvent(VK_LCONTROL, 0, KEYEVENTF_KEYUP, 0)
+	keybdEvent(VK_RCONTROL, 0, KEYEVENTF_KEYUP, 0)
+	keybdEvent(VK_LMENU, 0, KEYEVENTF_KEYUP, 0)
+	keybdEvent(VK_RMENU, 0, KEYEVENTF_KEYUP, 0)
+	keybdEvent(VK_LSHIFT, 0, KEYEVENTF_KEYUP, 0)
+	keybdEvent(VK_RSHIFT, 0, KEYEVENTF_KEYUP, 0)
+	keybdEvent(VK_LWIN, 0, KEYEVENTF_KEYUP, 0)
+	keybdEvent(VK_RWIN, 0, KEYEVENTF_KEYUP, 0)
+}
+
 func turnOffMonitor() {
-	hwnd := FindWindowW(syscall.StringToUTF16Ptr("Progman"), nil)
-	if hwnd != 0 {
-		// 先尝试发送到 Progman 窗口
-		SendMessageW(hwnd, 0x0112, 0xF170, 2) // WM_SYSCOMMAND, SC_MONITORPOWER, 2=off
-	} else {
-		// 如果找不到 Progman，尝试广播到所有窗口
-		SendMessageW(HWND(0xFFFF), 0x0112, 0xF170, 2)
-	}
+	// 先补发修饰键 keyup，修复系统键状态（避免吞 keyup 导致 Ctrl/Alt 卡键）
+	releaseModifiers()
+
+	// 输入屏蔽必须同步设置（在钩子回调返回前生效），防止松开热键的 keyup 唤醒显示器
+	blockInputFor(monitorOffProtectDuration)
+
+	// 广播关屏必须异步执行：
+	// SendMessageW(HWND_BROADCAST) 是同步广播，会阻塞等待所有顶层窗口处理，
+	// 若在低层钩子回调中同步调用，回调超时会导致钩子被系统卸载（后续热键全部失效）。
+	go func() {
+		SendMessageW(HWND_BROADCAST, WM_SYSCOMMAND, SC_MONITORPOWER, 2)
+	}()
+
+	// 防误唤醒保护：周期重发关屏命令兜底
+	go func() {
+		deadline := time.Now().Add(monitorOffProtectDuration)
+		for time.Now().Before(deadline) {
+			time.Sleep(monitorOffProtectInterval)
+			SendMessageW(HWND_BROADCAST, WM_SYSCOMMAND, SC_MONITORPOWER, 2)
+		}
+	}()
 }
 
 // ============================================================

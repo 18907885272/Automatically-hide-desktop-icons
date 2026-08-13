@@ -338,6 +338,7 @@ func saveSettingsFromDialog(hwnd HWND) {
 	}
 
 	newCfg.Validate()
+	newCfg.ParseHotkeys()
 	*cfg = newCfg
 	saveConfig(cfg)
 }

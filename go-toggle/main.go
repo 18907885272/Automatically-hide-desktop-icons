@@ -11,7 +11,7 @@ import (
 
 var (
 	cfg *Config
-	version = "v2"
+	version = "v2.1"
 	productName = "自动隐藏桌面图标"
 )
 

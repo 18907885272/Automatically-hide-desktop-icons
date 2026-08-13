@@ -2,9 +2,21 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
+
+// HotkeySpec 解析后的热键规格（不参与 JSON 序列化）
+type HotkeySpec struct {
+	Ctrl  bool
+	Shift bool
+	Alt   bool
+	Win   bool
+	Key   uint32 // 主键 vkCode
+	Valid bool
+}
 
 // Config 程序配置
 type Config struct {
@@ -18,6 +30,70 @@ type Config struct {
 	DblclickDesktopEnabled bool   `json:"dblclick_desktop_enabled"`
 	DblclickTaskbarEnabled bool   `json:"dblclick_taskbar_enabled"`
 	IdleHideTimeout       float64 `json:"idle_hide_timeout"`
+
+	ToggleHK  HotkeySpec `json:"-"`
+	ExitHK    HotkeySpec `json:"-"`
+	MonitorHK HotkeySpec `json:"-"`
+}
+
+// hotkeyKeyByName 热键主键名称 → vkCode 映射
+var hotkeyKeyByName = map[string]uint32{
+	"space": VK_SPACE,
+	"q":     VK_Q,
+	"down":  VK_DOWN,
+	"up":    VK_UP,
+	"left":  VK_LEFT,
+	"right": VK_RIGHT,
+	"esc":   VK_ESCAPE,
+	"enter": VK_RETURN,
+	"tab":   VK_TAB,
+}
+
+func init() {
+	// 字母 a-z
+	for i := 0; i < 26; i++ {
+		hotkeyKeyByName[string(rune('a'+i))] = uint32(0x41 + i) // VK_A = 0x41
+	}
+	// 数字 0-9
+	for i := 0; i < 10; i++ {
+		hotkeyKeyByName[string(rune('0'+i))] = uint32(0x30 + i) // VK_0 = 0x30
+	}
+	// F1-F12
+	for i := 1; i <= 12; i++ {
+		hotkeyKeyByName[fmt.Sprintf("f%d", i)] = uint32(0x6F + i) // VK_F1 = 0x70
+	}
+}
+
+// parseHotkeySpec 解析形如 "ctrl+alt+down" 的热键字符串
+func parseHotkeySpec(s string) HotkeySpec {
+	var spec HotkeySpec
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(s)), "+")
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		switch p {
+		case "ctrl", "control":
+			spec.Ctrl = true
+		case "shift":
+			spec.Shift = true
+		case "alt":
+			spec.Alt = true
+		case "win", "windows":
+			spec.Win = true
+		default:
+			if k, ok := hotkeyKeyByName[p]; ok && spec.Key == 0 {
+				spec.Key = k
+			}
+		}
+	}
+	spec.Valid = spec.Key != 0
+	return spec
+}
+
+// ParseHotkeys 根据字符串字段重新解析三个热键规格
+func (c *Config) ParseHotkeys() {
+	c.ToggleHK = parseHotkeySpec(c.ToggleHotkey)
+	c.ExitHK = parseHotkeySpec(c.ExitHotkey)
+	c.MonitorHK = parseHotkeySpec(c.MonitorHotkey)
 }
 
 func defaultConfig() *Config {
@@ -75,6 +151,7 @@ func loadConfig() *Config {
 		}
 	}
 	cfg.Validate()
+	cfg.ParseHotkeys()
 	saveConfig(cfg)
 	return cfg
 }

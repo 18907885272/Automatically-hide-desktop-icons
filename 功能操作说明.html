@@ -77,7 +77,7 @@
 </head>
 <body>
     <h1>自动隐藏桌面图标 - 功能操作说明</h1>
-    <p style="color:#666;margin-top:-15px;margin-bottom:25px;">版本: v2026.08.10</p>
+    <p style="color:#666;margin-top:-15px;margin-bottom:25px;">版本: v2.1</p>
 
     <div class="section">
         <h2>概述</h2>
@@ -89,12 +89,12 @@
         <ul>
             <li><strong>托盘图标左键单击</strong>：切换桌面图标的显示/隐藏状态，显示图标时最小化所有应用窗口，隐藏图标时不恢复窗口</li>
             <li><strong>托盘图标右键菜单</strong>：包含"设置"和"退出"选项</li>
-            <li><strong>快捷键切换</strong>：Ctrl + 空格 切换桌面图标显示/隐藏</li>
-            <li><strong>快捷键退出</strong>：Ctrl + Shift + Q 退出程序</li>
-            <li><strong>双击检测</strong>：双击桌面或任务栏空白处可切换图标显示/隐藏（可独立控制）</li>
+            <li><strong>快捷键切换</strong>：Ctrl + 空格 切换桌面图标显示/隐藏（可配置）</li>
+            <li><strong>快捷键退出</strong>：Ctrl + Shift + Q 退出程序（可配置）</li>
+            <li><strong>双击检测</strong>：双击桌面或任务栏空白处可切换图标显示/隐藏（可独立控制），双击桌面图标不会触发</li>
             <li><strong>空闲超时</strong>：长时间无操作自动隐藏桌面图标</li>
             <li><strong>设置窗口</strong>：Win32 原生窗口，所有参数可配置</li>
-            <li><strong>关屏快捷键</strong>：Ctrl + Win + Alt 一键关闭显示器</li>
+            <li><strong>关屏快捷键</strong>：Ctrl + Alt + 向下箭头 一键关闭显示器（带防误唤醒保护）</li>
         </ul>
     </div>
 
@@ -170,8 +170,8 @@
                 </tr>
                 <tr>
                     <td><code>monitor_hotkey</code></td>
-                    <td>ctrl+win+alt</td>
-                    <td><strong>关屏快捷键</strong>。按下 Ctrl + Win + Alt 时关闭显示器（屏幕变黑）。</td>
+                    <td>ctrl+alt+down</td>
+                    <td><strong>关屏快捷键</strong>。按下 Ctrl + Alt + 向下箭头 时关闭显示器（屏幕变黑），关屏后带 3 秒防误唤醒保护，期间松开按键/移动鼠标不会点亮屏幕，之后动鼠标即可唤醒。</td>
                 </tr>
                 <tr>
                     <td><code>monitor_enabled</code></td>
@@ -201,7 +201,8 @@
             <ul>
                 <li>将 <code>idle_hide_timeout</code> 设置为 0 可禁用空闲自动隐藏功能</li>
                 <li>如果不需要双击切换，可设置 <code>dblclick_desktop_enabled</code> 和 <code>dblclick_taskbar_enabled</code> 为 false</li>
-                <li>快捷键可能与其他软件冲突，如需修改请使用设置窗口</li>
+                <li>三个快捷键（切换/退出/关屏）都可在设置窗口或 <code>config.json</code> 中修改，支持 ctrl/shift/alt/win 修饰键与 space、字母、数字、F1-F12、方向键等主键</li>
+                <li>修改 <code>config.json</code> 后需重启程序生效；快捷键可能与其他软件冲突，建议避开 Ctrl+Alt+方向键（显卡驱动的屏幕旋转快捷键）</li>
             </ul>
         </div>
     </div>
@@ -231,6 +232,18 @@
                 </tr>
             </thead>
             <tbody>
+                <tr>
+                    <td>v2.1</td>
+                    <td>2026.08.13</td>
+                    <td>
+                        <strong>热键配置化与关屏优化：</strong><br>
+                        - 三个快捷键（切换/退出/关屏）改为从 config.json 读取，可自定义修饰键与主键<br>
+                        - 关屏快捷键改为 Ctrl+Alt+向下箭头，关屏后带 3 秒防误唤醒保护（松键/鼠标不再点亮屏幕）<br>
+                        - 命中热键时吞键，避免显卡驱动 Ctrl+Alt+方向键 屏幕旋转冲突<br>
+                        - 修复关屏后 Ctrl/Alt 卡键导致的后续快捷键错乱<br>
+                        - 双击桌面图标不再触发切换，仅双击空白处切换
+                    </td>
+                </tr>
                 <tr>
                     <td>v2026.08.10</td>
                     <td>2026.08.10</td>
@@ -286,7 +299,7 @@
             <li>支持动态托盘图标切换（显示/隐藏状态不同图标）</li>
             <li>图标文件已内嵌到 EXE 中，无需额外放置文件</li>
             <li>配置文件 <code>config.json</code> 可手动编辑（UTF-8 编码）</li>
-            <li>版本号：v2026.08.10</li>
+            <li>版本号：v2.1</li>
         </ul>
     </div>
 </body>

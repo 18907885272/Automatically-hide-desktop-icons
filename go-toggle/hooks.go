@@ -2,6 +2,7 @@ package main
 
 import (
 	"runtime"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -24,7 +25,25 @@ var (
 	lastClickPt   POINT
 
 	idleTimer *time.Timer
+
+	// 关屏保护窗口：此时间点前吞掉所有键盘/鼠标输入，防止输入唤醒显示器
+	inputBlockUntil time.Time
+	inputBlockMu    sync.Mutex
 )
+
+// blockInputFor 设置输入屏蔽截止时间（关屏后调用，防止 keyup/鼠标动作唤醒显示器）
+func blockInputFor(d time.Duration) {
+	inputBlockMu.Lock()
+	inputBlockUntil = time.Now().Add(d)
+	inputBlockMu.Unlock()
+}
+
+// isInputBlocked 判断当前是否处于输入屏蔽窗口内
+func isInputBlocked() bool {
+	inputBlockMu.Lock()
+	defer inputBlockMu.Unlock()
+	return time.Now().Before(inputBlockUntil)
+}
 
 // ============================================================
 // 鼠标钩子
@@ -32,6 +51,10 @@ var (
 
 func mouseHookProc(nCode, wParam, lParam uintptr) uintptr {
 	if int(nCode) >= 0 {
+		// 关屏保护窗口内吞掉所有鼠标事件，防止鼠标移动/点击唤醒显示器
+		if isInputBlocked() {
+			return 1
+		}
 		handleMouseEvent(int(nCode), wParam, lParam)
 	}
 	return CallNextHookEx(mouseHook, int(nCode), wParam, lParam)
@@ -101,14 +124,30 @@ func abs(x int) int {
 // ============================================================
 
 func keyboardHookProc(nCode, wParam, lParam uintptr) uintptr {
-	if int(nCode) >= 0 && (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN) {
+	if int(nCode) >= 0 {
 		kbd := (*KBDLLHOOKSTRUCT)(unsafe.Pointer(lParam))
-		handleHotkey(uint32(kbd.VkCode))
+		injected := (kbd.Flags & LLKHF_INJECTED) != 0
+		// 关屏保护窗口内吞掉真实键盘事件（松手 keyup 等），防止唤醒显示器；
+		// 但放行程序注入的 keyup（releaseModifiers 补发的修饰键 keyup，带 LLKHF_INJECTED），
+		// 让系统键状态恢复，避免 Ctrl/Alt 卡键导致后续快捷键错乱。
+		if isInputBlocked() && !injected {
+			return 1
+		}
+		if wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN {
+			if handleHotkey(uint32(kbd.VkCode)) {
+				// 命中热键：吞掉该按键，不传递给系统。
+				// 关键作用：Ctrl+Alt+方向键 是显卡驱动的"屏幕旋转"快捷键，
+				// 若透传会导致驱动执行旋转、重置显示器、把刚关闭的屏幕重新点亮。
+				// 吞键可阻止显卡驱动收到该组合，保证关屏保持生效。
+				return 1
+			}
+		}
 	}
 	return CallNextHookEx(keyboardHook, int(nCode), wParam, lParam)
 }
 
-func handleHotkey(vkCode uint32) {
+// handleHotkey 判断是否命中热键并执行对应动作，返回是否命中（供调用方决定吞键）
+func handleHotkey(vkCode uint32) bool {
 	// 当前正在按下的键（vkCode）直接视为已按下，因为 GetAsyncKeyState
 	// 在低层键盘钩子回调中对当前键可能返回 false
 	currentIsCtrl := vkCode == VK_LCONTROL || vkCode == VK_RCONTROL || vkCode == VK_CONTROL
@@ -122,17 +161,35 @@ func handleHotkey(vkCode uint32) {
 	alt := currentIsAlt || (GetAsyncKeyState(VK_MENU)&0x8000 != 0)
 	win := currentIsWin || (GetAsyncKeyState(VK_LWIN)&0x8000 != 0 || GetAsyncKeyState(VK_RWIN)&0x8000 != 0)
 
-	// 命中热键时执行
-	if cfg.ToggleEnabled && ctrl && !shift && !alt && !win && (vkCode == VK_SPACE) {
-		toggleDesktopIcons()
-		resetIdleTimer()
+	// 命中热键时执行（修饰键与配置完全匹配，避免 ctrl+space+alt 误触发 ctrl+space）
+	// 注意：动作全部异步执行。低层钩子回调必须快速返回（<300ms），
+	// 否则 Windows 会静默卸载钩子，导致后续所有热键失效。
+	matched := false
+	if cfg.ToggleEnabled && matchesHotkey(cfg.ToggleHK, vkCode, ctrl, shift, alt, win) {
+		matched = true
+		go func() {
+			toggleDesktopIcons()
+			resetIdleTimer()
+		}()
 	}
-	if cfg.ExitEnabled && ctrl && shift && !alt && !win && (vkCode == VK_Q) {
-		postQuit()
+	if cfg.ExitEnabled && matchesHotkey(cfg.ExitHK, vkCode, ctrl, shift, alt, win) {
+		matched = true
+		go postQuit()
 	}
-	if cfg.MonitorEnabled && ctrl && !shift && alt && win && currentIsAlt {
+	if cfg.MonitorEnabled && matchesHotkey(cfg.MonitorHK, vkCode, ctrl, shift, alt, win) {
+		matched = true
 		turnOffMonitor()
 	}
+	return matched
+}
+
+// matchesHotkey 判断当前按键是否命中热键规格：
+// 主键必须等于 spec.Key，且四个修饰键状态与 spec 完全一致（不多不少）
+func matchesHotkey(spec HotkeySpec, vkCode uint32, ctrl, shift, alt, win bool) bool {
+	if !spec.Valid || vkCode != spec.Key {
+		return false
+	}
+	return ctrl == spec.Ctrl && shift == spec.Shift && alt == spec.Alt && win == spec.Win
 }
 
 // ============================================================
