@@ -135,11 +135,10 @@ func keyboardHookProc(nCode, wParam, lParam uintptr) uintptr {
 		}
 		if wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN {
 			if handleHotkey(uint32(kbd.VkCode)) {
-				// 命中热键：吞掉该按键，不传递给系统。
-				// 关键作用：Ctrl+Alt+方向键 是显卡驱动的"屏幕旋转"快捷键，
-				// 若透传会导致驱动执行旋转、重置显示器、把刚关闭的屏幕重新点亮。
-				// 吞键可阻止显卡驱动收到该组合，保证关屏保持生效。
-				return 1
+				// 命中热键：放行该按键，让修饰键正常释放。
+				// 吞键会导致系统认为 Ctrl/Alt/Win 等修饰键一直按下，后续所有快捷键错乱。
+				// 正确做法：只放行修饰键的 keyup（releaseModifiers 补发），让系统键状态恢复。
+				// 关屏保护窗口内，真实输入（松手 keyup 等）会被吞掉，防止唤醒显示器。
 			}
 		}
 	}

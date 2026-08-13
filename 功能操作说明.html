@@ -77,7 +77,7 @@
 </head>
 <body>
     <h1>自动隐藏桌面图标 - 功能操作说明</h1>
-    <p style="color:#666;margin-top:-15px;margin-bottom:25px;">版本: v2.1</p>
+    <p style="color:#666;margin-top:-15px;margin-bottom:25px;">版本: v2.2</p>
 
     <div class="section">
         <h2>概述</h2>
@@ -89,8 +89,8 @@
         <ul>
             <li><strong>托盘图标左键单击</strong>：切换桌面图标的显示/隐藏状态，显示图标时最小化所有应用窗口，隐藏图标时不恢复窗口</li>
             <li><strong>托盘图标右键菜单</strong>：包含"设置"和"退出"选项</li>
-            <li><strong>快捷键切换</strong>：Ctrl + 空格 切换桌面图标显示/隐藏（可配置）</li>
-            <li><strong>快捷键退出</strong>：Ctrl + Shift + Q 退出程序（可配置）</li>
+            <li><strong>快捷键切换</strong>：Ctrl + 空格 切换桌面图标显示/隐藏（可配置，修饰键正常释放）</li>
+            <li><strong>快捷键退出</strong>：Ctrl + Shift + Q 退出程序（可配置，修饰键正常释放）</li>
             <li><strong>双击检测</strong>：双击桌面或任务栏空白处可切换图标显示/隐藏（可独立控制），双击桌面图标不会触发</li>
             <li><strong>空闲超时</strong>：长时间无操作自动隐藏桌面图标</li>
             <li><strong>设置窗口</strong>：Win32 原生窗口，所有参数可配置</li>
@@ -106,7 +106,7 @@
         <h3>2. 切换桌面图标</h3>
         <ul>
             <li><strong>左键单击托盘图标</strong>：立即切换桌面图标的显示/隐藏状态，显示图标时自动最小化所有应用窗口，隐藏图标时不恢复窗口</li>
-            <li><strong>快捷键</strong>：按下 Ctrl + 空格 切换桌面图标显示/隐藏</li>
+            <li><strong>快捷键</strong>：按下 Ctrl + 空格 切换桌面图标显示/隐藏（修饰键正常释放，不卡键）</li>
             <li><strong>双击桌面空白处</strong>：双击桌面空白区域可切换图标显示/隐藏（受设置控制）</li>
             <li><strong>双击任务栏空白处</strong>：双击任务栏空白区域可切换图标显示/隐藏（受设置控制）</li>
         </ul>
@@ -171,7 +171,7 @@
                 <tr>
                     <td><code>monitor_hotkey</code></td>
                     <td>ctrl+alt+down</td>
-                    <td><strong>关屏快捷键</strong>。按下 Ctrl + Alt + 向下箭头 时关闭显示器（屏幕变黑），关屏后带 3 秒防误唤醒保护，期间松开按键/移动鼠标不会点亮屏幕，之后动鼠标即可唤醒。</td>
+                    <td><strong>关屏快捷键</strong>。按下 Ctrl + Alt + 向下箭头 时关闭显示器（屏幕变黑），关屏后带 3 秒防误唤醒保护，期间松开按键/移动鼠标不会点亮屏幕，之后动鼠标即可唤醒。修饰键正常释放，不会卡键。</td>
                 </tr>
                 <tr>
                     <td><code>monitor_enabled</code></td>
@@ -232,6 +232,16 @@
                 </tr>
             </thead>
             <tbody>
+                <tr>
+                    <td>v2.2</td>
+                    <td>2026.08.13</td>
+                    <td>
+                        <strong>修复快捷键卡键问题：</strong><br>
+                        - 移除命中热键时的吞键逻辑，修饰键正常释放，不再卡键影响后续快捷键<br>
+                        - 保留关屏保护窗口内的输入屏蔽（只吞掉真实输入，放行程序注入的修饰键 keyup）<br>
+                        - 关屏后 3 秒内松开修饰键/移动鼠标不会唤醒屏幕，之后动鼠标即可唤醒
+                    </td>
+                </tr>
                 <tr>
                     <td>v2.1</td>
                     <td>2026.08.13</td>
@@ -299,7 +309,7 @@
             <li>支持动态托盘图标切换（显示/隐藏状态不同图标）</li>
             <li>图标文件已内嵌到 EXE 中，无需额外放置文件</li>
             <li>配置文件 <code>config.json</code> 可手动编辑（UTF-8 编码）</li>
-            <li>版本号：v2.1</li>
+            <li>版本号：v2.2</li>
         </ul>
     </div>
 </body>
