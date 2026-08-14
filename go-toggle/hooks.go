@@ -18,7 +18,7 @@ var (
 	keyboardHook HHOOK
 
 	hookThreadID uint32
-	exitCh       chan struct{}
+	hookDone     chan struct{}
 
 	// 双击检测状态
 	lastClickTime uint32
@@ -212,7 +212,7 @@ func resetIdleTimer() {
 // ============================================================
 
 func startHookThread() {
-	exitCh = make(chan struct{})
+	hookDone = make(chan struct{})
 	go hookThreadMain()
 }
 
@@ -239,19 +239,32 @@ func hookThreadMain() {
 		if !result || msg.Message == WM_QUIT {
 			break
 		}
-		select {
-		case <-exitCh:
-			PostThreadMessageW(hookThreadID, WM_QUIT, 0, 0)
-		default:
-		}
 	}
 
-	// 清理钩子
+	// 清理钩子（确保在 Unhook 后关闭 channel，通知主线程）
 	if mouseHook != 0 {
 		UnhookWindowsHookEx(mouseHook)
+		mouseHook = 0
 	}
 	if keyboardHook != 0 {
 		UnhookWindowsHookEx(keyboardHook)
+		keyboardHook = 0
+	}
+
+	hookThreadID = 0
+	close(hookDone)
+}
+
+// stopHookThread 通知钩子线程退出并等待其完成清理（卸载钩子）。
+// 必须在程序退出前调用，确保低层钩子被正确释放，避免残留钩子干扰其他程序。
+func stopHookThread() {
+	if hookThreadID != 0 {
+		// 向钩子线程发送 WM_QUIT，唤醒 GetMessageW 使其退出消息循环
+		PostThreadMessageW(hookThreadID, WM_QUIT, 0, 0)
+	}
+	if hookDone != nil {
+		// 等待钩子线程完成 UnhookWindowsHookEx 后再返回
+		<-hookDone
 	}
 }
 

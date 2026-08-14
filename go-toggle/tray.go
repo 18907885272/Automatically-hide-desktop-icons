@@ -160,6 +160,10 @@ func onTrayReady() {
 }
 
 func onTrayExit() {
+	// 先停止钩子线程并等待钩子卸载完成，再恢复桌面图标。
+	// 这确保低层键盘/鼠标钩子在进程退出前被正确释放，
+	// 避免残留钩子干扰 Chrome 等应用程序的键盘输入。
+	stopHookThread()
 	showDesktopIconsOnly()
 }
 

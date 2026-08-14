@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -77,7 +77,7 @@
 </head>
 <body>
     <h1>自动隐藏桌面图标 - 功能操作说明</h1>
-    <p style="color:#666;margin-top:-15px;margin-bottom:25px;">版本: v2.2</p>
+    <p style="color:#666;margin-top:-15px;margin-bottom:25px;">版本: v2.3</p>
 
     <div class="section">
         <h2>概述</h2>
@@ -233,6 +233,16 @@
             </thead>
             <tbody>
                 <tr>
+                    <td>v2.3</td>
+                    <td>2026.08.14</td>
+                    <td>
+                        <strong>修复退出时钩子未释放问题：</strong><br>
+                        - 修复程序退出时低层键盘钩子（WH_KEYBOARD_LL）未卸载的 bug，该 bug 会导致 Chrome 等浏览器表单输入异常<br>
+                        - 重构钩子线程退出机制：新增 stopHookThread() 函数，通过 WM_QUIT 消息唤醒钩子线程，阻塞等待 UnhookWindowsHookEx 完成后才退出<br>
+                        - onTrayExit() 中优先调用 stopHookThread() 释放钩子，再恢复桌面图标
+                    </td>
+                </tr>
+                <tr>
                     <td>v2.2</td>
                     <td>2026.08.13</td>
                     <td>
@@ -309,7 +319,7 @@
             <li>支持动态托盘图标切换（显示/隐藏状态不同图标）</li>
             <li>图标文件已内嵌到 EXE 中，无需额外放置文件</li>
             <li>配置文件 <code>config.json</code> 可手动编辑（UTF-8 编码）</li>
-            <li>版本号：v2.2</li>
+            <li>版本号：v2.3</li>
         </ul>
     </div>
 </body>
